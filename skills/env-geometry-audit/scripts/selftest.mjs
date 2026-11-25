@@ -1,7 +1,7 @@
 // node selftest.mjs: builds a small synthetic scene with one known instance of each defect class
 // (plus correctly built parts that must NOT be reported) and checks every audit finds exactly what it should.
 import { MeshWriter, rectLoop } from '../../env-geometry-construction/scripts/meshkit/meshkit.mjs';
-import { coplanar, support, clearance, shells } from './audit-lib.mjs';
+import { coplanar, support, clearance, shells, faceting } from './audit-lib.mjs';
 
 const box = (name, x, y, z, sx, sy, sz, { group = 'solid', ground = false, flip = false, open = false } = {}) => {
   const w = new MeshWriter().use('s');
@@ -52,6 +52,23 @@ const shNames = Object.fromEntries(sh.hits.map((h) => [h.mesh, h.issues.join('; 
 check('shells finds the inside-out solid', /inside-out/.test(shNames['inside-out'] || ''), shNames['inside-out']);
 check('shells finds the open shell', /open edges/.test(shNames['open-shell'] || ''), shNames['open-shell']);
 check('shells passes the well-built wall', !shNames.wall);
+
+// faceting: a few-sided cylinder built with face-angle creasing shades flat (reported); the same shape
+// from meshkit's lathe is smooth (clean); a box's 90° corners are real (clean); a faceted gem is skipped
+{
+  const ring = (y) => [...Array(8)].map((_, k) => [0.2 * Math.cos((k / 8) * Math.PI * 2), y, 0.2 * Math.sin((k / 8) * Math.PI * 2)]);
+  const bad = new MeshWriter().use('s'); bad.quads([ring(0), ring(1)], { closeU: true, crease: 30 });
+  const good = new MeshWriter().use('s'); good.lathe([[0.2, 0], [0.2, 1]], { segments: 8, capStart: false, capEnd: false });
+  const gem = new MeshWriter().use('s'); gem.lathe([[0, 0], [0.2, 0.15], [0, 0.3]], { segments: 8, faceted: true });
+  const m = (name, w, extra = {}) => { const g = w.build().s; return { name, position: g.position, index: g.index, normal: g.normal, part: g.part, ...extra }; };
+  const boxG = box('box', 0, 0, 0, 1, 1, 1);
+  const bw = new MeshWriter().use('s'); bw.extrude(rectLoop(0, 0, 1, 1), [], 1, {});
+  const fc = faceting([m('flat-cylinder', bad), m('smooth-lathe', good), m('gem', gem, { faceted: true }), m('box', bw), { name: 'flat-material', position: boxG.position, index: boxG.index, flatShading: true }]);
+  const names = fc.hits.map((h) => h.mesh);
+  check('faceting finds the flat-shaded cylinder', names.includes('flat-cylinder'), JSON.stringify(fc.hits.map((h) => [h.mesh, h.facetEdges])));
+  check('faceting passes the smooth lathe, the box corners and the faceted gem', !names.includes('smooth-lathe') && !names.includes('box') && !names.includes('gem'));
+  check('faceting reports flatShading materials', names.includes('flat-material'));
+}
 
 if (failed) { console.error(`${failed} check(s) failed`); process.exit(1); }
 console.log('all audit checks passed');

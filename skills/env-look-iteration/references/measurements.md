@@ -12,6 +12,7 @@
 | Clipping | `clipped` share | Clipping in a single channel isn't counted separately. Check `mean` near 255. |
 | Glow around bright sources | `--glow` profile at 10–140 px | Depends on the source's position and size matching |
 | Whites | Mean and saturation of sunlit white regions, plus the clipped share | A uniform white reads blown out even when it isn't clipped: check `local` |
+| Horizon barcode on water | `--stripes Y0,Y1,X0,X1` on the first 1–3% of image height under the horizon, over open water only | Vertical edges of coasts, hulls and buildings are real structure: keep them out of the band |
 
 ## Practice
 

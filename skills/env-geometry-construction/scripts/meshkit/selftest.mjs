@@ -90,5 +90,28 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(b));
   for (let i = 0; i < g.normal.length; i += 3) { const ax = [Math.abs(g.normal[i]), Math.abs(g.normal[i + 1]), Math.abs(g.normal[i + 2])]; if (Math.max(...ax) < 0.999) soft++; }
   check('hard corners stay hard', soft === 0, `${soft} averaged normals`);
 }
+{ // few-sided curved parts shade smooth by default; faceted: true keeps facets on purpose
+  const radialDev = (g) => { // max angle between a side vertex's horizontal normal and its radial direction
+    let m = 0; const P = g.position, n = g.normal;
+    for (let i = 0; i < P.length / 3; i++) { const hx = n[i * 3], hz = n[i * 3 + 2], hl = Math.hypot(hx, hz), r = Math.hypot(P[i * 3], P[i * 3 + 2]); if (hl < 0.5 || r < 1e-6) continue; m = Math.max(m, Math.acos(Math.min(1, (hx * P[i * 3] + hz * P[i * 3 + 2]) / (hl * r))) * 180 / Math.PI); }
+    return m;
+  };
+  const baluster = [[0.06, 0], [0.06, 0.04, 'sharp'], [0.035, 0.1], [0.055, 0.35], [0.03, 0.6], [0.05, 0.66, 'sharp'], [0.05, 0.7]];
+  const w = new MeshWriter().use('a'); w.lathe(baluster, { segments: 8 });
+  check('8-sided lathe shades smooth (default crease)', radialDev(w.build().a) < 0.5, `max ${radialDev(w.build().a).toFixed(2)} deg`);
+  const f = new MeshWriter().use('a'); f.lathe([[1, 0], [1, 3]], { segments: 8, faceted: true, capStart: false, capEnd: false });
+  check('faceted lathe keeps flat facets', radialDev(f.build().a) > 20, `max ${radialDev(f.build().a).toFixed(2)} deg`);
+  const circle8 = [...Array(8)].map((_, k) => [0.05 * Math.cos((k / 8) * Math.PI * 2), 0.05 * Math.sin((k / 8) * Math.PI * 2)]);
+  const s = new MeshWriter().use('t'); s.sweep(circle8, [[0, 0, 0], [0, 1, 0]], { up: [1, 0, 0], capEnds: false });
+  check('8-sided round sweep shades smooth', radialDev(s.build().t) < 0.5, `max ${radialDev(s.build().t).toFixed(2)} deg`);
+  const rings = [0, 1, 2].map((y) => [...Array(6)].map((_, k) => [0.1 * Math.cos((k / 6) * Math.PI * 2), y, 0.1 * Math.sin((k / 6) * Math.PI * 2)]));
+  const l = new MeshWriter().use('l'); l.loft(rings, { closed: true });
+  check('6-sided loft shades smooth', radialDev(l.build().l) < 0.5, `max ${radialDev(l.build().l).toFixed(2)} deg`);
+  const rings4 = [0, 1].map((y) => [...Array(4)].map((_, k) => [0.1 * Math.cos((k / 4) * Math.PI * 2), y, 0.1 * Math.sin((k / 4) * Math.PI * 2)]));
+  const sq = new MeshWriter().use('q'); sq.loft(rings4, { closed: true });
+  check('4-sided loft (a square post) keeps hard corners', radialDev(sq.build().q) > 40, `max ${radialDev(sq.build().q).toFixed(2)} deg`);
+  const tw = new MeshWriter().use('q'); tw.loft(rings4, { closed: true, round: true });
+  check('round: true shades a 4-sided twig round', radialDev(tw.build().q) < 0.5, `max ${radialDev(tw.build().q).toFixed(2)} deg`);
+}
 if (failed) { console.error(`${failed} check(s) failed`); process.exit(1); }
 console.log('all meshkit checks passed');

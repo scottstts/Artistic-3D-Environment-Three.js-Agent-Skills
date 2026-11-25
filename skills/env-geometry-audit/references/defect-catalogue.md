@@ -11,6 +11,8 @@
 | support | `contactTol` | 2 cm | Contact closer than this counts as touching. Interpenetration also counts as contact. |
 | clearance | `seat` | 1 cm | A seat deeper than this is reported as interpenetration |
 | clearance | `sampleStep` | 5 cm | Points along edges catch parts that pass straight through a solid |
+| faceting | `maxDeg` | 50° | Hard normal breaks between faces meeting at up to 50° are facets of a curved surface (8 sides meet at 45°). Steeper breaks are real corners. |
+| faceting | `minEdges` | 6 | A few stray hard edges aren't a faceted surface |
 
 ## Classes, causes and fixes
 
@@ -30,4 +32,5 @@
 | A missing wall side | One face of a carved wall wound backwards. A double-sided clay view hid it. | Fix the polygon writer. Clay views are single-sided. Run a winding audit. |
 | Vegetation in structures | Plants placed with no solid test | Build-time test against the solids (push out, or drop) |
 | A swept-path collision | A moving part's path crosses static members | Clearance per animation frame. Re-route the part or move the member. |
+| Flat facets on a curved part | A lathe, sweep or loft creased by face angle with few sides (the facet angle exceeds the crease); geometry made non-indexed; `flatShading` on | Smoothing by construction (around the revolution, along the path), shared vertices, `flatShading` off. Intended facets marked `faceted`. |
 | Bottomless container | An open box with no floor or inner wall | Closed vessel: wall thickness, floor, rim |

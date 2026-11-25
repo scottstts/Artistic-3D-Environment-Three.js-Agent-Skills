@@ -31,12 +31,21 @@ Analytic sine-sum water and normal-mapped planes are stand-ins *(only if the use
 - **Caustics** on the beds of shallow water, from the surface curvature or slopes. Never a scrolling texture.
 - **Cloud shadows** on the water modulate the sun terms.
 
+**Horizon-safe by construction.** Every ocean so far has shipped a "barcode": dark or bright vertical stripes in a band just below the horizon. Three separate mechanisms each produce it, so all three are closed when the water is first built, not after the stripes appear:
+
+1. **Ambient occlusion on far, low-precision depth.** Leave water, sky and emissives out of the AO input from the moment AO is set up. Fade AO out with view distance. Use a reversed depth buffer.
+2. **Sky reflection reading single texels at grazing angles.** Each slope sample is squeezed vertically near the horizon, so one sky-map texel stretches into a stripe. Always read the sky map at the mip level that matches the sample's footprint.
+3. **Depth-based water terms at distance:** screen-space refraction, absorption by water depth, foam from depth difference. Depth precision fails toward the horizon and these terms quantize into columns. Fade every depth-based term out by distance, well before precision fails. Beyond that, far water uses the analytic body colour and the sky reflection only.
+
+Also: no fixed per-pixel dither or jitter pattern on far water, because a static pattern stretched at grazing angles reads as stripes.
+
 **Bounded water** (pools, rivers, fountains): simulated or spectral waves at the body's own scale (capillary-gravity for small pools), with refraction to the real bed, depth absorption, caustics, and reflection of the real surroundings.
 
 **Breaking waves and surf:** a body of water with thickness. The crest is thin and translucent, the base thick and dark, the face textured, and the wave has a life cycle: form, throw, crash, then subside fast. The spray hides nothing. A curved sheet with foam is a stand-in.
 
 **Always a defect:**
 
+- Barcode stripes (vertical columns) anywhere near the horizon, at any camera height.
 - A bright line where water meets an object.
 - A camera-dependent boundary or band in the water.
 - A seam between cascades or detail tiers.
@@ -75,10 +84,16 @@ Analytic sine-sum water and normal-mapped planes are stand-ins *(only if the use
    - refraction and absorption;
    - foam;
    - cloud shadows.
-6. **Contact:** reflections clipped at the waterline, no bright edge where objects meet the water, wakes and foam where they belong.
-7. **Shallow and bounded water:** caustics on the bed, refraction with a guard band, real absorption ([references/bounded-water.md](references/bounded-water.md)).
-8. **Breaking waves**, where the scene has surf ([references/breaking-waves.md](references/breaking-waves.md)).
-9. **Check:**
+6. **Horizon check, before any look work.** Right after the first render of the shaded ocean:
+   - capture grazing views toward the horizon from three or more heights (near the water, eye or deck height, high above), facing toward and away from the sun;
+   - run `measure.py --stripes` (`env-look-iteration`) on the band just below the horizon in each;
+   - any stripe flag: bisect the three mechanisms above (AO off, then depth-based terms off, then reflection off) and close the one that removes it.
+
+   Repeat the check whenever AO, refraction, reflection or the depth setup changes.
+7. **Contact:** reflections clipped at the waterline, no bright edge where objects meet the water, wakes and foam where they belong.
+8. **Shallow and bounded water:** caustics on the bed, refraction with a guard band, real absorption ([references/bounded-water.md](references/bounded-water.md)).
+9. **Breaking waves**, where the scene has surf ([references/breaking-waves.md](references/breaking-waves.md)).
+10. **Check:**
    - the hero view region against the reference;
    - toward the sun and away from it;
    - grazing views near the horizon (banding, muddiness);
@@ -91,7 +106,7 @@ Analytic sine-sum water and normal-mapped planes are stand-ins *(only if the use
 |---|---|---|---|
 | Sea dark except one glint strip | One reflection direction per pixel; glitter from a clamped sun radiance | Per-term view: reflection only | Integrate reflection and glitter over the slope distribution. Use the sun's real irradiance, not the display-clamped disc. |
 | Flat, painted blue sea | The sky reflection scaled far below Fresnel | Reflection term alone | A physical Fresnel weight, with the real sky map |
-| Barcode or vertical stripes below the horizon | At grazing angles each slope sample reads one sky texel, stretched vertically; or depth-quantized AO darkening far water | Isolate: turn AO off, then turn reflection off | Choose the sky-map mip from each sample's footprint. Keep AO off sky and water, and fade it with distance. |
+| Barcode or vertical stripes below the horizon | One of three: AO on quantized far depth; depth-based water terms (refraction, depth absorption, depth foam) quantizing at distance; single sky texels stretched at grazing angles | `measure.py --stripes` on the band. Bisect in order: AO off, depth-based terms off, reflection off. | Close all three, not just the one found: AO masked and faded, depth-based terms faded by distance, footprint-matched sky mips. Fixing one cause and stopping is the plausible wrong fix: the next change re-exposes another. |
 | Muddy horizon with no wave texture | Detail faded without handing slope variance to roughness; the footprint ignores the view slant | Roughness and slope view at the horizon | Hand the lost slope variance to roughness. Use the slanted footprint. |
 | No reflection of the ship or buildings | Only the sky is reflected | Look at the waterline | A planar mirror render of the scene, clipped at the waterline, integrated over the slopes |
 | Waves look like a water-park chute or a curved sheet | A shaped surface with no water-body physics | Cross-section | Thickness, crest translucency, a textured face, the life cycle |
@@ -102,6 +117,7 @@ Analytic sine-sum water and normal-mapped planes are stand-ins *(only if the use
 
 - A per-term breakdown at the hero view (reflection, glitter, refraction and body, foam) against the reference.
 - Region crops: glitter path, deep water, shallows, horizon.
+- The horizon check: `measure.py --stripes` clean on grazing views from three or more heights, toward and away from the sun.
 - Grazing and high views: no banding, no repetition.
 - A motion capture: waves evolve, foam lives and decays, reflections update every frame.
 - The CPU reference statistics matching one GPU frame.

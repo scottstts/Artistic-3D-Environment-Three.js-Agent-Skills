@@ -17,7 +17,8 @@ Finding geometry defects across the whole scene, fixing the visible ones at the 
 - parts with no chain of contact to the ground;
 - interpenetration deeper than a seat, including across the full range of every animation;
 - open shells, flipped or inconsistent winding, inside-out solids;
-- vegetation intersecting solids.
+- vegetation intersecting solids;
+- flat shading on surfaces meant to be smooth (`faceting`: hard normal breaks at small angles, non-indexed geometry, `flatShading` materials). Mark parts with intended facets (gems, polygonal towers) as faceted so they are skipped.
 
 **The audit and the visual check together are the evidence.** Fix the hits that are visibly exposed. Verify each fix from the view that exposes it.
 
@@ -66,6 +67,7 @@ Finding geometry defects across the whole scene, fixing the visible ones at the 
 | Flicker the audit didn't report | Near-coplanar faces at a slight angle, or faces outside the plane tolerance that fight at distance | Increase `tolAngleDeg` and `tolDist`. Flicker sweep at that view. | The same fix. Also check the near/far plane ratio and use a reversed depth buffer. |
 | The user still sees flicker after an "audit clean" | The audit was run on a subset, sampled views only, or cached modules | Re-export everything and re-run. Flicker sweep from the user's viewpoint. | Fix, then repeat both checks |
 | A part floating near its support | Hand-set height, or the support resized later | `support` hit: lowest Y against the support's top | Compute the seat from the support's real geometry |
+| Visible facets on balusters, columns, bark or domes | A crease threshold below the facet angle (8 sides = 45° between faces), unshared vertices, or `flatShading` | `faceting` hit on that mesh; raking-light close-up | Smooth by construction at the generator (`env-geometry-construction` → smooth shading). Raising the segment count leaves the facets flat, just smaller. |
 | Pinnacle or finial shows sky from below | No bottom face, a slit to the spire, smaller cap than shaft | `shells` (open edges). A view from below. | Closed solids, seated on supports at least their footprint |
 | Leaves inside walls or roofs | Vegetation placed without testing against solids | `clearance(between: ['plant','solid'])` | Push the sprig out along its normal, or drop it, at build time. Never grow plants through structures. |
 | A surface visible only from one side | Inverted winding, a missing back face, a single-sided shell | `shells`: inside-out or open | Fix the writer or the loop orientation. Close the shell. |
@@ -78,7 +80,7 @@ Finding geometry defects across the whole scene, fixing the visible ones at the 
 
 ## Tools
 
-- **[scripts/audit-lib.mjs](scripts/audit-lib.mjs):** `coplanar`, `support`, `clearance`, `shells`, `runAll`, `meshesFromThree`. No dependencies; runs in Node or the browser. Measured at about 360k triangles and 32k components: about 11 s for all four audits in Node. For scenes of millions of triangles, audit per district or per generator, and always the region the user reported.
+- **[scripts/audit-lib.mjs](scripts/audit-lib.mjs):** `coplanar`, `support`, `clearance`, `shells`, `faceting`, `runAll`, `meshesFromThree`. No dependencies; runs in Node or the browser. Measured at about 360k triangles and 32k components: about 11 s for all four audits in Node. For scenes of millions of triangles, audit per district or per generator, and always the region the user reported.
 - **[scripts/audit.mjs](scripts/audit.mjs):** the command line (`--ground-y`, `--seat`, `--tol`, `--top`).
 - **[scripts/selftest.mjs](scripts/selftest.mjs):** a synthetic scene with one defect of each class, plus correct parts that must not be reported. Run `node scripts/selftest.mjs`.
 

@@ -4,6 +4,7 @@
 Usage:
   python3 measure.py ref.png render.png [--regions regions.json] [--grid 4x3] [--glow X,Y]
                      [--class NAME:hmin,hmax,smin,vmin] [--sbs out.png] [--diff out.png]
+  python3 measure.py render.png --stripes Y0,Y1[,X0,X1]   barcode check on one image (normalised band)
   python3 measure.py --self-test
 
 The render is resized to the reference's size first. Regions are boxes in normalised coordinates,
@@ -21,6 +22,14 @@ Per region, for both images and their difference:
 --glow X,Y   radial brightness profile around a normalised point (for example the sun disc), at
              10/25/50/90/140 px. Compare glow width with the reference.
 --sbs/--diff write a side-by-side image and an amplified difference image.
+--stripes Y0,Y1[,X0,X1]  barcode detector for a band of open water just below the horizon (the stripes
+             live in the first 1-3% of image height under it; restrict X to open water, away from coasts,
+             hulls and buildings, whose vertical edges are real). Vertical stripes vary fast along x and
+             stay the same from row to row; wave texture, glitter and noise do not. Reports coherence
+             (energy of the row-averaged high-pass x profile over the mean per-row energy: about 1/rows for
+             noise, near 1 for stripes), the stripe amplitude in 0-255 levels, and a flag when coherence
+             > max(0.3, 3/rows) and amplitude > 0.5. On real barcodes coherence ran 0.36-0.64; on clean
+             water 0.03-0.16.
 Requires Pillow and NumPy.
 """
 import sys, json
@@ -77,6 +86,18 @@ def glow_profile(a, cx, cy, radii=(10, 25, 50, 90, 140)):
     yy, xx = np.mgrid[0:H, 0:W]; R = np.hypot(xx - X, yy - Y)
     return {str(r): round(float(L[(R >= r - 2) & (R <= r + 2)].mean()), 1) if ((R >= r - 2) & (R <= r + 2)).any() else None for r in radii}
 
+def stripes(a, y0, y1, x0=0.0, x1=1.0, win=9):
+    H, W = a.shape[:2]; band = luma(a)[int(y0 * H):max(int(y1 * H), int(y0 * H) + 2), int(x0 * W):int(x1 * W)]
+    k = np.ones(win) / win
+    hp = lambda row: row - np.convolve(row, k, mode="same")
+    rows = np.array([hp(r)[win:-win] for r in band])               # per-row high-pass along x, edges trimmed
+    prof = hp(band.mean(axis=0))[win:-win]                          # high-pass of the row-averaged profile
+    per_row = float((rows ** 2).mean()) + 1e-9
+    coherence = float((prof ** 2).mean()) / per_row
+    amp = float(prof.std())
+    return {"rows": int(band.shape[0]), "coherence": round(coherence, 3), "amplitude": round(amp, 2),
+            "barcode": bool(coherence > max(0.3, 3.0 / band.shape[0]) and amp > 0.5)}
+
 def measure(ref, ren, regions=None, grid=None, classes=None, glow=None):
     regs = dict(regions or {})
     if grid:
@@ -101,14 +122,25 @@ def self_test():
     gold = np.zeros((40, 40, 3)); gold[..., 0], gold[..., 1], gold[..., 2] = 210, 160, 60
     g = measure(gold, np.full_like(gold, 128.0), classes={"gold": (20, 50, 0.35, 0.35)})["frame"]
     assert g["ref"]["classes"]["gold"] > 0.99 and g["render"]["classes"]["gold"] == 0, g
+    # stripe detector: water-like band (horizontal streaks + noise) is clean; add vertical stripes and it flags
+    H, W = 64, 400
+    water = 110 + 8 * np.sin(np.arange(H)[:, None] * 0.9 + rng.standard_normal((H, 1))) + 6 * rng.standard_normal((H, W))
+    img = np.repeat(np.clip(water, 0, 255)[..., None], 3, axis=2)
+    clean = stripes(img, 0, 1)
+    bars = img.copy(); bars[:, ::7, :] -= 8; bars[:, 1::7, :] -= 8                         # dark columns every 7 px
+    dirty = stripes(np.clip(bars, 0, 255), 0, 1)
+    assert not clean["barcode"] and dirty["barcode"], (clean, dirty)
     print("measure self-test passed")
 
 if __name__ == "__main__":
     a = sys.argv[1:]
     if not a or a[0] in ("-h", "--help"): print(__doc__); sys.exit(0)
     if a[0] == "--self-test": self_test(); sys.exit(0)
-    ref_p, ren_p = a[0], a[1]
     opt = lambda k: a[a.index(k) + 1] if k in a else None
+    if opt("--stripes"):
+        v = [float(x) for x in opt("--stripes").split(",")]
+        print(json.dumps(stripes(load(a[0]), *v), indent=1)); sys.exit(0)
+    ref_p, ren_p = a[0], a[1]
     ref = load(ref_p); ren = load(ren_p, (ref.shape[1], ref.shape[0]))
     regions = json.load(open(opt("--regions"))) if opt("--regions") else None
     grid = tuple(int(x) for x in opt("--grid").split("x")) if opt("--grid") else None

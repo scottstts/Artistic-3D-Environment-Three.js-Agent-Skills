@@ -5,9 +5,12 @@
 // Core ideas
 // - Author parts in local frames through a matrix stack (push/pop/translate/rotate/scale). Mirroring
 //   (negative scale) flips winding automatically, so mirrored halves stay outward-facing.
-// - Every primitive emits a "patch" of triangles. A patch without explicit normals gets creased
-//   normals: smooth across edges flatter than `crease` degrees, hard across sharper ones. So
-//   curved surfaces shade smooth and real corners stay crisp.
+// - Smooth shading by default. lathe, sweep and loft smooth by construction: around the revolution and
+//   along the path/section regardless of side count, split only at real corners (a vertex turning more
+//   than creaseDeg that is not part of a regular run approximating a curve; mark points 'sharp' or
+//   'smooth' to override). round: true (sweep, loft) treats the section as a circle at any side count.
+//   Pass faceted: true for flat facets on purpose (gems, octagonal towers).
+//   patch() and grid() without groups fall back to creased normals by face angle (`crease` degrees).
 // - Solids are closed. extrude() and wall() build front, back, reveals and edges from one outline
 //   with holes, so openings cut through every layer and nothing is single-sided.
 //
@@ -226,8 +229,40 @@ export const planeSurface = () => (s, t, d) => [s, t, d];
 export const cylinderSurface = (R) => (s, t, d) => { const a = s / R; return [Math.sin(a) * (R + d), t, Math.cos(a) * (R + d)]; };
 
 // ---------------------------------------------------------------- creased normals
-function creasedNormals(tris, creaseDeg) {
+// A polyline vertex is a real corner when it turns more than the crease angle, unless it sits in a
+// regular run of similar turns up to 60°: that is a polygon standing in for a curve (an 8-sided round
+// section turns 45° at every vertex and must shade smooth; a rectangle turns 90° and stays hard).
+// Points may carry a third element, 'sharp' or 'smooth', to override.
+export function sharpVertices(pts, closed, creaseDeg) {
+  const n = pts.length, turn = new Array(n).fill(0), lim = (creaseDeg * Math.PI) / 180;
+  const d = (a, b) => b.slice(0, 3).map((v, k) => v - (a[k] ?? 0)).map((v) => (Number.isFinite(v) ? v : 0));
+  for (let i = 0; i < n; i++) {
+    if (!closed && (i === 0 || i === n - 1)) continue;
+    const u = d(pts[(i - 1 + n) % n], pts[i]), v = d(pts[i], pts[(i + 1) % n]);
+    const lu = Math.hypot(...u), lv = Math.hypot(...v); if (lu < 1e-12 || lv < 1e-12) continue;
+    turn[i] = Math.acos(Math.max(-1, Math.min(1, u.reduce((s, x, k) => s + x * v[k], 0) / (lu * lv))));
+  }
+  return turn.map((t, i) => {
+    const flag = pts[i][2] === 'sharp' || pts[i][3] === 'sharp' ? true : pts[i][2] === 'smooth' || pts[i][3] === 'smooth' ? false : null;
+    if (flag !== null) return flag;
+    if (t <= lim) return false;
+    const similar = (x) => Math.abs(x - t) <= 0.3 * t;
+    return !(t <= Math.PI / 3 + 1e-6 && similar(turn[(i - 1 + n) % n]) && similar(turn[(i + 1) % n]));
+  });
+}
+// run id per edge (edge k goes from vertex k to k+1); a new run starts at each sharp vertex
+function edgeRuns(sharp, closed, edges) {
+  const runs = []; let r = 0;
+  for (let k = 0; k < edges; k++) { if (k > 0 && sharp[k]) r++; runs.push(r); }
+  if (closed && !sharp[0]) for (let k = edges - 1; k >= 0 && runs[k] === r && r > 0; k--) runs[k] = 0; // wrap the last run into the first
+  return runs;
+}
+
+function creasedNormals(tris, creaseDeg, groups = null) {
   // tris: [{ p:[a,b,c], uv:[...] }] in world space. Returns per-corner normals.
+  // With groups (one id per triangle), faces smooth together exactly when they share a group and a
+  // vertex position, whatever the angle between them: primitives use this so that smoothing follows
+  // the construction (around a revolution, along a path), not the side count.
   const cosC = Math.cos((creaseDeg * Math.PI) / 180);
   const q = (p) => Math.round(p[0] * 1e5) + ',' + Math.round(p[1] * 1e5) + ',' + Math.round(p[2] * 1e5);
   const fu = tris.map((t) => norm(cross(sub(t.p[1], t.p[0]), sub(t.p[2], t.p[0]))));
@@ -238,7 +273,7 @@ function creasedNormals(tris, creaseDeg) {
   tris.forEach((t, i) => t.p.forEach((p, k) => { const key = q(p); if (!incident.has(key)) incident.set(key, []); incident.get(key).push([i, cornerAngle(t, k)]); }));
   return tris.map((t, i) => t.p.map((p) => {
     let n = [0, 0, 0];
-    for (const [j, w] of incident.get(q(p))) if (dot(fu[i], fu[j]) >= cosC) n = add(n, mul(fu[j], w));
+    for (const [j, w] of incident.get(q(p))) if (groups ? groups[j] === groups[i] : dot(fu[i], fu[j]) >= cosC) n = add(n, mul(fu[j], w));
     return norm(len(n) > 0 ? n : fu[i]);
   }));
 }
@@ -264,14 +299,16 @@ export class MeshWriter {
   rotateZ(a) { const c = Math.cos(a), s = Math.sin(a); return this.apply([c, s, 0, 0, -s, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); }
 
   // tris in local space; normals (optional) as per-corner local normals
-  patch(tris, { crease = 30, normals = null } = {}) {
+  patch(tris, { crease = 30, normals = null, groups = null } = {}) {
     const m = this.m, flip = m3det(m) < 0;
     let W = tris.map((t) => ({ p: t.p.map((p) => m4point(m, p)), uv: t.uv || [[0, 0], [0, 0], [0, 0]] }));
     let N = normals ? normals.map((ns) => ns.map((n) => m4normal(m, n))) : null;
     if (flip) { W = W.map((t) => ({ p: [t.p[0], t.p[2], t.p[1]], uv: [t.uv[0], t.uv[2], t.uv[1]] })); if (N) N = N.map((n) => [n[0], n[2], n[1]]); }
-    W = W.filter((t, i) => { const ok = len(cross(sub(t.p[1], t.p[0]), sub(t.p[2], t.p[0]))) > 1e-12; if (!ok && N) N[i] = null; return ok; });
-    if (N) N = N.filter(Boolean);
-    const NN = N || creasedNormals(W, crease);
+    const keep = W.map((t) => len(cross(sub(t.p[1], t.p[0]), sub(t.p[2], t.p[0]))) > 1e-12);
+    W = W.filter((_, i) => keep[i]);
+    if (N) N = N.filter((_, i) => keep[i]);
+    const G = groups ? groups.filter((_, i) => keep[i]) : null;
+    const NN = N || creasedNormals(W, crease, G);
     if (!this.slots.has(this.current)) this.slots.set(this.current, new Slot());
     const S = this.slots.get(this.current);
     const qk = (p, n, uv) => this.partId + '#' + [p, n].map((v) => v.map((x) => Math.round(x * 1e5)).join(',')).join('|') + '|' + uv.map((x) => Math.round(x * 1e4)).join(',');
@@ -288,16 +325,17 @@ export class MeshWriter {
   }
 
   // quad helper in local space: a,b,c,d counter-clockwise seen from the outside
-  quads(rows, { closeU = false, closeV = false, crease = 30, uv = null } = {}) {
-    const tris = [], nu = rows[0].length, nv = rows.length;
+  quads(rows, { closeU = false, closeV = false, crease = 30, uv = null, group = null } = {}) {
+    const tris = [], groups = group ? [] : null, nu = rows[0].length, nv = rows.length;
     const UV = (i, j) => (uv ? uv(i, j) : [i / (nu - 1), j / (nv - 1)]);
     for (let j = 0; j < nv - 1 + (closeV ? 1 : 0); j++) for (let i = 0; i < nu - 1 + (closeU ? 1 : 0); i++) {
       const j1 = (j + 1) % nv, i1 = (i + 1) % nu;
       const a = rows[j][i], b = rows[j][i1], c = rows[j1][i1], d = rows[j1][i];
       const ua = UV(i, j), ub = UV(i + 1, j), uc = UV(i + 1, j + 1), ud = UV(i, j + 1);
       tris.push({ p: [a, b, c], uv: [ua, ub, uc] }, { p: [a, c, d], uv: [ua, uc, ud] });
+      if (group) { const g = group(i, j); groups.push(g, g); }
     }
-    return this.patch(tris, { crease });
+    return this.patch(tris, { crease, groups });
   }
 
   grid(fn, nu, nv, { closeU = false, closeV = false, creaseDeg = 30 } = {}) {
@@ -307,19 +345,23 @@ export class MeshWriter {
     return this.quads(rows, { closeU, closeV, crease: creaseDeg });
   }
 
-  lathe(profile, { segments = 32, arc = Math.PI * 2, phase = 0, capStart = true, capEnd = true, creaseDeg = 40 } = {}) {
+  lathe(profile, { segments = 32, arc = Math.PI * 2, phase = 0, capStart = true, capEnd = true, creaseDeg = 40, faceted = false } = {}) {
     this.part();
     const full = Math.abs(arc - Math.PI * 2) < 1e-9, cols = full ? segments : segments + 1;
     const ring = (r, y) => [...Array(cols)].map((_, i) => { const a = phase + (arc * i) / segments; return [r * Math.sin(a), y, r * Math.cos(a)]; });
     const rows = profile.map(([r, y]) => ring(r, y));
     // profile runs bottom → top; rows ordered by profile, columns by angle: winding outward
-    const tris = [];
+    // smoothing: always smooth around the revolution (whatever the side count), split only at real
+    // profile corners; faceted = flat facets on purpose (octagonal towers, cut stone drums)
+    const runs = edgeRuns(sharpVertices(profile, false, creaseDeg), false, profile.length - 1);
+    const tris = [], groups = [];
     for (let j = 0; j < rows.length - 1; j++) for (let i = 0; i < cols - (full ? 0 : 1); i++) {
       const i1 = (i + 1) % cols, a = rows[j][i], b = rows[j][i1], c = rows[j + 1][i1], d = rows[j + 1][i];
       const u0 = i / segments, u1 = (i + 1) / segments, v0 = j / (rows.length - 1), v1 = (j + 1) / (rows.length - 1);
       tris.push({ p: [a, b, c], uv: [[u0, v0], [u1, v0], [u1, v1]] }, { p: [a, c, d], uv: [[u0, v0], [u1, v1], [u0, v1]] });
+      const g = faceted ? `${runs[j]}:${i}` : runs[j]; groups.push(g, g);
     }
-    this.patch(tris, { crease: creaseDeg });
+    this.patch(tris, { groups });
     const cap = (k, up) => { // flat disc closing an end whose radius is not zero, facing ±y
       const [r, y] = profile[k]; if (r <= 1e-9 || !full) return;
       const tz = triangulate(ring(r, y).map((p) => [p[0], p[2]]));
@@ -335,7 +377,7 @@ export class MeshWriter {
   }
 
   // section frames by parallel transport; exact mitres at interior joints
-  sweep(profile, path, { closedPath = false, closedProfile = true, up = [0, 1, 0], creaseDeg = 30, capEnds = true } = {}) {
+  sweep(profile, path, { closedPath = false, closedProfile = true, up = [0, 1, 0], creaseDeg = 30, capEnds = true, faceted = false, round = false } = {}) {
     this.part();
     const n = path.length, segs = closedPath ? n : n - 1;
     const T = []; for (let i = 0; i < segs; i++) T.push(norm(sub(path[(i + 1) % n], path[i])));
@@ -362,15 +404,20 @@ export class MeshWriter {
     const rings = []; for (let i = 0; i < n; i++) rings.push(ringAt(i));
     if (closedPath) rings.push(rings[0]);
     const prof = closedProfile ? [...Array(profile.length + 1)].map((_, k) => k % profile.length) : profile.map((_, k) => k);
-    const tris = [];
+    // smoothing groups: split at real profile corners and at real path joints, smooth elsewhere
+    // round: the profile stands in for a circle at any side count (rails, ropes, tubes)
+    const pRuns = edgeRuns(round ? profile.map((q) => q[2] === 'sharp') : sharpVertices(profile, closedProfile, creaseDeg), closedProfile, prof.length - 1);
+    const jRuns = edgeRuns(sharpVertices(path, closedPath, creaseDeg), closedPath, rings.length - 1);
+    const tris = [], groups = [];
     // the profile is wound counter-clockwise in (side, up); quads oriented outward
     for (let j = 0; j < rings.length - 1; j++) for (let k = 0; k < prof.length - 1; k++) {
       const a = rings[j][prof[k]], b = rings[j][prof[k + 1]], c = rings[j + 1][prof[k + 1]], d = rings[j + 1][prof[k]];
       const v0 = j / (rings.length - 1), v1 = (j + 1) / (rings.length - 1), u0 = k / (prof.length - 1), u1 = (k + 1) / (prof.length - 1);
       tris.push({ p: [a, c, b], uv: [[u0, v0], [u1, v1], [u1, v0]] }, { p: [a, d, c], uv: [[u0, v0], [u0, v1], [u1, v1]] });
+      const g = faceted ? `${j}:${k}` : `${pRuns[k]}:${jRuns[j]}`; groups.push(g, g);
     }
     if (area2(profile) < 0) for (const t of tris) { [t.p[1], t.p[2]] = [t.p[2], t.p[1]]; [t.uv[1], t.uv[2]] = [t.uv[2], t.uv[1]]; }
-    this.patch(tris, { crease: creaseDeg });
+    this.patch(tris, { groups });
     if (closedProfile && !closedPath && capEnds) { // end caps facing back along / forward along the path
       const tz = triangulate(profile), idxOf = tz.points.map((p) => profile.findIndex((q) => q[0] === p[0] && q[1] === p[1]));
       const make = (ring, want) => tz.tris.map(([a, b, c]) => {
@@ -383,7 +430,7 @@ export class MeshWriter {
     return this;
   }
 
-  loft(rings, { closed = true, capStart = false, capEnd = false, creaseDeg = 30 } = {}) {
+  loft(rings, { closed = true, capStart = false, capEnd = false, creaseDeg = 30, faceted = false, round = false } = {}) {
     this.part();
     // closed sections are re-ordered so each ring winds counter-clockwise about the loft axis
     // (Newell normal along first → second ring); then the sides face outward and the caps agree
@@ -394,7 +441,11 @@ export class MeshWriter {
       const c0 = mul(r0.reduce((s, p) => add(s, p), [0, 0, 0]), 1 / r0.length), c1 = mul(rows[1].reduce((s, p) => add(s, p), [0, 0, 0]), 1 / rows[1].length);
       if (dot([nx, ny, nz], sub(c1, c0)) < 0) rows = rows.map((r) => [...r].reverse());
     }
-    this.quads(rows, { closeU: closed, crease: creaseDeg });
+    // smoothing: smooth along the loft and around each section, split only at real section corners
+    // (taken from the first ring); faceted = flat facets on purpose
+    // round: sections stand in for circles at any side count (branches, bark tubes, cables)
+    const runs = edgeRuns(round ? rows[0].map(() => false) : sharpVertices(rows[0], closed, creaseDeg), closed, rows[0].length - (closed ? 0 : 1));
+    this.quads(rows, { closeU: closed, group: (i, j) => (faceted ? `${i}:${j}` : runs[i % runs.length]) });
     // caps: fan from the centroid (lofted sections are near-planar and convex), each triangle oriented to
     // face away from the neighbouring ring, so caps agree with the sides whatever the ring order
     const centre = (ring) => mul(ring.reduce((s, p) => add(s, p), [0, 0, 0]), 1 / ring.length);

@@ -35,6 +35,8 @@ Everything that occludes or redistributes light after the direct lights are set 
 - **Applied to indirect light only** (sky fill, environment, probes), never to direct sun or lamp light. In three.js TSL: `builtinAOContext` on the scene pass.
 - **Denoised, without halos or grain.** Use full resolution, or half resolution with a bilateral upsample that is clean in motion.
 - **Kept off sky, water and emissive surfaces,** and faded on far terrain where depth precision creates false occlusion: the vertical "barcode" near the horizon. Use a reversed depth buffer.
+  - Build the mask and the distance fade into the AO setup when AO is first added. Don't wait for the stripes to appear. In any scene with open water, run the water skill's horizon check (`env-water`, `measure.py --stripes`) right after AO goes in.
+  - AO is only one of three causes of the horizon barcode on water. See `env-water` → horizon-safe by construction.
 - **Thickness and radius set to the scene's scale.** AO that spans metres darkens open ground. AO that is too short misses corners.
 
 **Indirect light:**

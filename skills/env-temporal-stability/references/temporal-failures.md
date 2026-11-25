@@ -13,7 +13,7 @@
 | Artifact | Mechanism |
 |---|---|
 | Dark grid in a ray-marched layer | Amortised tracing: unconverged pixels or a stale fallback show through in a regular pattern |
-| Moiré or barcode near the horizon | Depth quantization in AO, or single-texel environment lookups stretched at grazing angles |
+| Moiré or barcode near the horizon | One of three: depth quantization in AO; depth-based water terms (screen-space refraction, absorption or foam by depth difference) quantizing at distance; single-texel environment lookups stretched at grazing angles. See `env-water` → horizon-safe by construction. |
 | Stair-stepped horizon that slides with the camera | Coarse geometry or steps at a distance, resampled differently each frame |
 | Jagged-to-smooth change while panning | A temporal resolve converging after motion stops, or a tier switching |
 | Popping effects (bloom, god rays) as a source leaves the screen | A screen-space effect whose source is off-screen |

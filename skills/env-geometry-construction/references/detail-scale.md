@@ -38,5 +38,10 @@ A large single plane catches one value of light, however it is lit. If the refer
 ## Smoothness
 
 - **Segment count by screen size:** a curved silhouette needs enough segments that a chord's sagitta stays under about half a pixel at the closest view. For radius `r` with `n` segments, sagitta = `r · (1 − cos(π / n))`.
-- **Normals:** smooth across the revolution, and creased at real edges.
+- **Smooth shading is the default.** Flat facets only where the real object has them (cut gems, faceted crystal, flat-sided polygonal towers, dressed stone), marked as faceted on purpose.
+- **Crease threshold above the facet angle:** the angle between neighbouring faces of a curved surface is 360° ÷ sides around a lathe, and the per-segment turn along a sweep or loft. The crease threshold must exceed it, or every edge splits and the part shades flat. A few-sided part (8 sides = 45°) needs smoothing around its revolution regardless of a generic crease setting; only real profile corners stay hard.
+- **three.js specifics:**
+  - `computeVertexNormals()` averages only across shared vertices. Non-indexed geometry, or geometry after `toNonIndexed()`, gets face normals: flat. Merge vertices first (`BufferGeometryUtils.mergeVertices`), then compute normals, or write normals yourself.
+  - `material.flatShading = true` overrides smooth normals. Keep it off except for faceted parts.
+  - Merging parts into one geometry must carry their normals through the same transform (normal matrix with mirroring handled). Recomputing normals on the merged mesh smooths across real corners.
 - **Seams:** smoothing must not stop at a UV or material seam on a continuous surface.

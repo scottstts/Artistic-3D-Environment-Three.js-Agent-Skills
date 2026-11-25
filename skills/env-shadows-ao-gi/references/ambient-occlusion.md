@@ -20,6 +20,7 @@ scenePass.contextNode = builtinAOContext(mix(aoPass.getTextureNode().sample(scre
 ```
 
 - `builtinAOContext` applies AO to the indirect and ambient lighting only, not to direct lights.
+- Put the sky, water and emissive masks and the distance fade in this setup from the start. Added later, they arrive only after the barcode has already shipped. With open water, run the horizon check from `env-water` as soon as AO renders.
 - Keep sky, water and emissive meshes out of the pre-pass, or mask them: AO must never multiply them.
 - Use a reversed depth buffer (`new WebGPURenderer({ reversedDepthBuffer: true })`) for precision at distance.
 

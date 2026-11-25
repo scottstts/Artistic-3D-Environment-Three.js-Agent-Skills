@@ -43,6 +43,7 @@ Alpha-tested leaf cards attached to real twigs are fine. They are leaves, not st
 
 - A plant growing from a roof or a wall, from thin air, through a structure, or floating above its soil.
 - Identical clones of natural things. Every individual varies: shape, size, lean, branching, colour.
+- Flat-shaded facets on trunks, branches, stems or petals. Bark tubes shade round at every side count, including far tiers with few sides (`env-geometry-construction` → smooth shading; meshkit `loft` with `round: true`).
 - A detail-tier boundary you can see in shape, density or colour. Popping.
 - Wind that swirls, orbits, waves like seaweed or rotates whole plants. A whole plant "breathing" in scale.
 - Shadows that don't move with the moving plant, or proxy shadows that don't match it.

@@ -3,7 +3,8 @@
 //
 // Input: meshes = [{ name, position: Float32Array|number[], index?: Uint32Array|number[],
 //                    matrix?: number[16] (column-major, as three.js), group?: 'solid'|'plant'|'ground'|..., ground?: bool,
-//                    part?: per-vertex part ids (meshkit writes them) }]
+//                    part?: per-vertex part ids (meshkit writes them), normal?: per-vertex normals (for faceting),
+//                    faceted?: bool (flat facets on purpose: gems, polygonal towers; skipped by faceting) }]
 // Components are the connected pieces of each mesh; with a part attribute, each part is its own
 // component even where parts touch exactly.
 // meshesFromThree(root) builds that list from a three.js scene, expanding InstancedMesh instances.
@@ -13,6 +14,7 @@
 //   support(meshes, opts)     components with no chain of contact to the ground (floating parts)
 //   clearance(meshes, opts)   interpenetration deeper than the allowed seat, between components or groups
 //   shells(meshes, opts)      open edges, non-manifold edges, inconsistent winding, inside-out solids
+//   faceting(meshes, opts)    flat shading on surfaces meant to be smooth: hard normal breaks at small angles
 //   runAll(meshes, opts)      all of the above
 // Every hit carries mesh names and a world position, so you can trace it to the generator that made it
 // and look at it from a view that exposes it.
@@ -30,7 +32,7 @@ export function meshesFromThree(root, { filter = () => true } = {}) {
   root.traverse((o) => {
     if (!o.isMesh || !o.visible || !filter(o)) return;
     const g = o.geometry, pos = g.attributes.position.array, idx = g.index ? g.index.array : null, mw = o.matrixWorld.elements;
-    const base = { name: o.name || o.uuid, position: pos, index: idx, part: g.attributes.part ? g.attributes.part.array : null, group: o.userData?.auditGroup || 'solid', ground: !!o.userData?.ground };
+    const base = { name: o.name || o.uuid, position: pos, index: idx, part: g.attributes.part ? g.attributes.part.array : null, normal: g.attributes.normal ? g.attributes.normal.array : null, group: o.userData?.auditGroup || 'solid', ground: !!o.userData?.ground, faceted: !!o.userData?.faceted, flatShading: !!o.material?.flatShading };
     if (o.isInstancedMesh) {
       const im = o.instanceMatrix.array;
       for (let k = 0; k < o.count; k++) {
@@ -289,6 +291,52 @@ export function shells(meshes, { allowOpen = (c) => c.group === 'ground' || c.gr
   return { hits, summary: { components: P.comps.length, withIssues: hits.length } };
 }
 
+// ---------------------------------------------------------------- faceting
+// A hard edge is an edge whose two triangles don't share normals at its ends. A hard edge between faces
+// that meet at a small angle is almost always a facet of a surface meant to be smooth: a few-sided lathe
+// with a crease below its facet angle, non-indexed geometry, flatShading. maxDeg 50 covers parts of 8 or
+// more sides (8 sides meet at 45°). Real corners meet at larger angles and aren't reported; a deliberate
+// chamfer can appear as a candidate: confirm visually, and mark parts with intended facets `faceted`.
+// Works in local space (matrices don't change the angles); needs normals.
+export function faceting(meshes, { maxDeg = 50, minDeg = 1, minEdges = 6 } = {}) {
+  const hits = [];
+  meshes.forEach((m) => {
+    if (m.faceted || m.group === 'faceted') return;
+    if (m.flatShading) { hits.push({ mesh: m.name, facetEdges: null, hint: 'material.flatShading is on: every face renders flat whatever the normals' }); return; }
+    if (!m.normal) return;
+    const P = m.position, N = m.normal, I = m.index || [...Array(P.length / 3).keys()];
+    const key = (i) => (m.part ? m.part[i] + '#' : '') + Math.round(P[i * 3] * 1e4) + ',' + Math.round(P[i * 3 + 1] * 1e4) + ',' + Math.round(P[i * 3 + 2] * 1e4);
+    const wid = new Map(), weld = (i) => { const k = key(i); if (!wid.has(k)) wid.set(k, wid.size); return wid.get(k); };
+    const edges = new Map(), face = [];
+    for (let t = 0; t < I.length; t += 3) {
+      const v = [I[t], I[t + 1], I[t + 2]], p = v.map((i) => [P[i * 3], P[i * 3 + 1], P[i * 3 + 2]]);
+      const n = cross(sub(p[1], p[0]), sub(p[2], p[0])), l = len(n); if (l < 1e-12) { face.push(null); continue; }
+      face.push(n.map((x) => x / l));
+      for (let e = 0; e < 3; e++) {
+        const a = v[e], b = v[(e + 1) % 3], wa = weld(a), wb = weld(b), k = wa < wb ? wa + ':' + wb : wb + ':' + wa;
+        if (!edges.has(k)) edges.set(k, []); edges.get(k).push({ t: t / 3, a, b, wa });
+      }
+    }
+    const nrm = (i) => [N[i * 3], N[i * 3 + 1], N[i * 3 + 2]];
+    const sameN = (i, j) => i === j || dot(nrm(i), nrm(j)) > Math.cos((0.5 * Math.PI) / 180);
+    let count = 0, length = 0, at = null;
+    for (const list of edges.values()) {
+      if (list.length !== 2) continue;
+      const [e1, e2] = list, f1 = face[e1.t], f2 = face[e2.t]; if (!f1 || !f2) continue;
+      const deg = (Math.acos(Math.max(-1, Math.min(1, dot(f1, f2)))) * 180) / Math.PI;
+      if (deg < minDeg || deg > maxDeg) continue;
+      const a2 = e2.wa === e1.wa ? e2.a : e2.b, b2 = e2.wa === e1.wa ? e2.b : e2.a; // match ends
+      if (sameN(e1.a, a2) && sameN(e1.b, b2)) continue; // smooth edge
+      count++; const pa = [P[e1.a * 3], P[e1.a * 3 + 1], P[e1.a * 3 + 2]], pb = [P[e1.b * 3], P[e1.b * 3 + 1], P[e1.b * 3 + 2]];
+      length += len(sub(pa, pb)); at = at || pa.map((x, k) => +((x + pb[k]) / 2).toFixed(3));
+    }
+    const shared = m.index ? new Set(Array.from(I)).size < I.length : false;
+    if (count >= minEdges) hits.push({ mesh: m.name, facetEdges: count, facetEdgeLength: +length.toFixed(2), at, sharedVertices: shared, hint: shared ? 'crease below the facet angle, or smoothing split by construction' : 'no shared vertices (non-indexed): computeVertexNormals gives face normals' });
+  });
+  hits.sort((a, b) => (b.facetEdges ?? 1e9) - (a.facetEdges ?? 1e9));
+  return { hits, summary: { meshesWithFacets: hits.length } };
+}
+
 export function runAll(meshes, opts = {}) {
   const prepared = prepare(meshes);
   return {
@@ -296,5 +344,6 @@ export function runAll(meshes, opts = {}) {
     support: support(meshes, { ...opts.support, prepared }),
     clearance: clearance(meshes, { ...opts.clearance, prepared }),
     shells: shells(meshes, { ...opts.shells, prepared }),
+    faceting: faceting(meshes, opts.faceting),
   };
 }

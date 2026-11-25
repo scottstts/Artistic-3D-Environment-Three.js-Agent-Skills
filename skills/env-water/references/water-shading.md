@@ -44,3 +44,18 @@ This is what makes a sunset sea glow across its whole surface, not just in one c
 
   Use depth-aware sampling, and keep the object out of its own refraction lookup.
 - **Shoreline:** shallow-water colour fading into a wet-sand darkening band, and swash foam.
+
+## Far water and the horizon
+
+Toward the horizon, three things break at once: depth precision, the vertical footprint of each pixel, and the scene's screen-space data. Build the far water so none of them can show:
+
+| Term | Near water | Far water |
+|---|---|---|
+| Ambient occlusion | Never on water | Never on water |
+| Refraction (screen-space lookup of what's under the surface) | Real refraction with a guard band | Faded out by distance before depth precision fails; replaced by the body colour |
+| Absorption by water depth (depth buffer difference) | Real depth | Faded to the deep-water body colour |
+| Foam from depth difference (contact lines, shoreline) | On | Faded with the same distance |
+| Sky reflection | Slope-integrated, footprint-matched mips | Same, with the footprint stretched by 1/cos(view angle) along the view |
+| Jitter or dither | Varies per frame, or none | None |
+
+Choose the fade distances from the depth buffer's precision at the scene's near/far planes, and confirm them with the horizon check (`measure.py --stripes`) at several camera heights. The fades must be smooth over a long range, so they themselves never form a visible line.

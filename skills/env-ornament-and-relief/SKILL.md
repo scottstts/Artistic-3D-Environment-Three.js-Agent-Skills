@@ -22,6 +22,7 @@ Composing ornament and building it: carved versus applied, hierarchy, section, d
 - **Composed, never scattered.** Ornament is designed as a whole: a running scroll, mirrored scrolls from a centre, a candelabrum, a cartouche, a frieze. It is continuous, with one dominant movement and subordinate members growing out of it. Every leaf grows from a stem, and every scroll from a stem or a frame.
 - **Hierarchy and tiers.** Masses that read from the farthest view, then medium forms at the hero distance, then fine detail up close (`env-geometry-construction` → detail scale). Ornament at the wrong scale reads as lines or noise.
 - **Full sections.** Stems and scrolls are rounded and taper toward their tips. Leaves are cupped, with a midrib and lobes. Gold members are near-round in section. Flat ribbons, planks and thin blades read as cut-outs, not carving.
+- **Smooth shading on every curved member:** balusters, scrolls, beads, rounded mouldings. Visible flat facets on turned or rounded ornament are a defect (`env-geometry-construction` → smooth shading; `env-geometry-audit` → faceting).
 - **It grows from the structure.** Ornament sits where the construction invites it: on frames, friezes, panels, capitals, keystones, spandrels and brackets. Its outline follows the field it fills.
 - **Density matches the reference.** Restraint is part of taste. Never add pieces to raise the count.
 - **Metal ornament reads as metal:** chunky, faceted forms that reflect a varied surrounding, giving near-black next to hot highlights (`env-materials`).

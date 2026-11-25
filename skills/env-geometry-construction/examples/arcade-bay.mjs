@@ -11,7 +11,7 @@
 // Run: node arcade-bay.mjs [out.obj]   prints a solid check per slot and optionally writes an OBJ.
 import { MeshWriter, closedSolidCheck, rectLoop, archLoop, notchOutline } from '../scripts/meshkit/meshkit.mjs';
 import { writeFileSync } from 'node:fs';
-import { coplanar, clearance, shells, support } from '../../env-geometry-audit/scripts/audit-lib.mjs';
+import { coplanar, clearance, shells, support, faceting } from '../../env-geometry-audit/scripts/audit-lib.mjs';
 
 const BAY = 4.2, H = 6.0, T = 0.6;                   // bay width, wall height, wall thickness
 const OPEN_W = 2.4, SPRING = 3.2, SILL = 0.0;        // opening width, springing height, sill height
@@ -62,12 +62,13 @@ for (const [slot, g] of Object.entries(built)) {
 if (!Object.values(built).every((g) => closedSolidCheck(g).watertight)) { console.error('a part is not closed'); process.exit(1); }
 
 // run the scene audits on the result, as every build step should
-const meshes = Object.entries(built).map(([name, g]) => ({ name, position: g.position, index: g.index, part: g.part }));
+const meshes = Object.entries(built).map(([name, g]) => ({ name, position: g.position, index: g.index, part: g.part, normal: g.normal }));
 const report = {
   coplanarSameFacing: coplanar(meshes, { sameFacingOnly: true }).summary.pairs,
   interpenetrating: clearance(meshes, { seat: 0.01 }).summary.pairs,
   shellIssues: shells(meshes).summary.withIssues,
   unsupported: support(meshes, { groundHeight: () => 0 }).summary.unsupported,
+  unintendedFacets: faceting(meshes).summary.meshesWithFacets,
 };
 console.log('audit', report);
 if (Object.values(report).some((n) => n > 0)) { console.error('audit found defects'); process.exit(1); }

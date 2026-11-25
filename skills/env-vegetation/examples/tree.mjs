@@ -105,7 +105,7 @@ export function buildTree(tree, tier = 0) {
       let r = b.radii[i]; if (b.level === 0 && !b.root) r *= 1 + tree.P.flare * Math.exp(-i * 1.2); // root flare
       rings.push([...Array(seg)].map((_, k) => { const ang = (k / seg) * Math.PI * 2; return add(b.pts[i], add(mul(nrm, Math.cos(ang) * r), mul(bin, Math.sin(ang) * r))); }));
     }
-    w.loft(rings.map((r) => [...r].reverse()), { closed: true, capStart: true, capEnd: true, creaseDeg: 60 });
+    w.loft(rings.map((r) => [...r].reverse()), { closed: true, capStart: true, capEnd: true, round: true });
   };
   w.use('bark');
   for (const b of [...tree.branches.filter((b) => kept(b, T.keep)), ...tree.roots]) tube(b);

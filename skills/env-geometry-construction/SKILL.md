@@ -25,7 +25,10 @@ How forms are built: the construction methods, junctions, closed solids, smoothn
 - **Massing before detail.** Settle the depth of the big masses first. For example, an entablature that breaks forward over each column pair, or arches stepping inward ring by ring. Check them in plain white with contact shading only. Add detail in tiers: masses, then medium forms, then fine.
 - **Detail sized to the distance it is seen from.** Work out the pixel footprint at the closest and the hero distance ([references/detail-scale.md](references/detail-scale.md)). Relief one or two pixels deep reads as lines drawn on a surface. Forms that read at distance project tenths of a metre to metres, not centimetres.
 - **Repeated elements come from one definition.** One arcade, one radius. One storey, one height.
-- **Smooth surfaces shade smooth.** Use creased normals: smooth below the crease angle, hard above it. Use enough segments that the silhouette holds at the closest view.
+- **Smooth shading by default.** Every surface shades smooth unless the real object has flat facets. The faceted exceptions are cut gems, faceted crystal, polygonal towers and drums built with flat sides, dressed stone faces, and folded or creased sheet material. Mark those as faceted on purpose.
+  - Hard edges appear only where the real object has a corner: a moulding's step, a plinth's arris, the rim of a cap.
+  - **The crease rule:** the crease threshold must exceed the angle between neighbouring faces of a curved surface. Around a lathe that angle is 360° ÷ the number of sides: 8 sides is 45°, 12 is 30°. Along a sweep it is how sharply the path turns per segment. A low side count with a default crease below that angle shades every face flat.
+  - Use enough segments that the silhouette also holds at the closest view ([references/detail-scale.md](references/detail-scale.md)). Smooth normals hide facets in the shading, not in the outline.
 - **Trims follow their host.** A frame on a curved wall follows the curve. A chord cutting into the wall is a defect.
 
 **Always a defect:**
@@ -79,12 +82,14 @@ How forms are built: the construction methods, junctions, closed solids, smoothn
 | Pinnacles or finials show sky through them | No bottom face, a slit between shaft and spire, a cap smaller than the shaft | A close-up from below | Closed solids, seated on supports at least as large as their footprint |
 | Corners doubled or overlapping | Each façade builds its own corner piece | Look at the corner from above | Build each corner once, as one solid |
 | Legs or posts not attached | Lengths hand-set, or the part they meet was removed | Measure the gap | Run the member into its partner (a post into a volute's eye, a leg into the rail) |
+| Visible flat facets on a round or curved part (balusters, columns, bark, domes, vases) | The crease threshold is below the angle between neighbouring faces, so every edge splits its normal. Or the geometry has unshared vertices (non-indexed, or `toNonIndexed()`), so `computeVertexNormals()` can only return face normals. Or `material.flatShading` is on. | The faceting audit (`env-geometry-audit`): hard normal breaks at small angles. Look at the part under raking light. | Smoothing around the revolution or along the path must not depend on side count (meshkit handles this). Share vertices, or merge them before computing normals. Keep `flatShading` off. The plausible wrong fix is raising the segment count: the facets get smaller but stay flat. |
 | Mirrored half inside-out | The transform has a negative determinant and the winding wasn't flipped | Volume sign or culling | Use a writer that flips winding on mirroring (meshkit does) |
 
 ## Verification
 
 - A single-sided clay render: the hero view, four orbit views, and close-ups of every junction class.
 - `closedSolidCheck` (or the shell audit) clean for every part.
+- The faceting audit clean: no unintended flat shading on curved parts.
 - A pixel-footprint check: the relief depth of each detail tier against the footprint at the hero and closest distances.
 - The `env-geometry-audit` report: nothing visible remaining.
 

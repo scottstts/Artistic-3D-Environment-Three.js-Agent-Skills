@@ -4,7 +4,7 @@
 //   node audit.mjs scene.json [--ground-y 0] [--seat 0.01] [--tol 0.006] [--top 20]
 //   node audit.mjs --self-test
 //
-// scene.json: { "meshes": [{ "name", "position": [...], "index": [...], "matrix": [16]?, "group"?, "ground"? }],
+// scene.json: { "meshes": [{ "name", "position": [...], "index": [...], "normal": [...]?, "matrix": [16]?, "group"?, "ground"?, "faceted"? }],
 //               "frames"?: [ { "meshes": [...] }, ... ] }   optional animation frames, each audited for clearance
 // Export it from the scene's builders in Node, or from a debug hook with meshesFromThree(scene).
 // Prints a JSON report: the top hits of each audit, with mesh names and world positions.
@@ -22,5 +22,5 @@ const report = runAll(scene.meshes, {
   clearance: { seat: opt('--seat', 0.01) },
 });
 if (scene.frames) report.animation = scene.frames.map((f, i) => ({ frame: i, ...clearance(f.meshes, { seat: opt('--seat', 0.01) }).summary }));
-for (const k of ['coplanar', 'support', 'clearance', 'shells']) report[k].hits = report[k].hits.slice(0, top);
+for (const k of ['coplanar', 'support', 'clearance', 'shells', 'faceting']) report[k].hits = report[k].hits.slice(0, top);
 console.log(JSON.stringify(report, null, 2));

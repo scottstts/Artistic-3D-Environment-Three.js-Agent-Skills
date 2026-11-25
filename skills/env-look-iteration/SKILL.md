@@ -102,4 +102,4 @@ It never means only the next item on a to-do list.
 
 ## Tools
 
-- **[scripts/measure.py](scripts/measure.py):** region and grid statistics for reference against render: mean, percentiles, saturation, local contrast, clipping, colour-class coverage, glow profile, plus side-by-side and difference images. Run `--self-test` to check it.
+- **[scripts/measure.py](scripts/measure.py):** region and grid statistics for reference against render: mean, percentiles, saturation, local contrast, clipping, colour-class coverage, glow profile, plus side-by-side and difference images. `--stripes` detects a horizon barcode in a band of open water (used by `env-water`'s horizon check). Run `--self-test` to check it.
